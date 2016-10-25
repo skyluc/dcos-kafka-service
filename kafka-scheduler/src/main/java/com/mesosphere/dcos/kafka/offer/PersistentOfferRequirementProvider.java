@@ -147,10 +147,9 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
         Long port = brokerConfiguration.getPort();
         if (port == 0) {
             taskBuilder = removeResource(taskBuilder, PORTS);
-            taskBuilder.addResources(DynamicPortRequirement.getDesiredDynamicPort(
-                    KafkaEnvConfigUtils.toEnvName("port"),
-                    config.getServiceConfiguration().getRole(),
-                    config.getServiceConfiguration().getPrincipal()));
+            taskBuilder.addResources(ResourceUtils.getDesiredDynamicPort(config.getServiceConfiguration().getRole(),
+                    config.getServiceConfiguration().getPrincipal(),Optional.of(KafkaEnvConfigUtils.toEnvName("port")))
+                              .getResource());
             return taskBuilder;
         } else {
             return updateValue(taskBuilder, PORTS, range(port, port));
@@ -307,7 +306,18 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
                         config.getBrokerConfiguration().getMem()));
 
         Long port = brokerConfiguration.getPort();
-        if (port == 0) {
+        ResourceRequirement portReq = new ResourceRequirement(ResourceUtils.getDesiredRanges(
+                role,
+                principal,
+                "ports",
+                Arrays.asList(
+                        Range.newBuilder()
+                                .setBegin(port)
+                                .setEnd(port).build())));
+        if (port==0){
+            portReq.setEnvName(KafkaEnvConfigUtils.toEnvName("port"));  //!!!!
+        }
+        /*if (port == 0) {
             taskBuilder.addResources(DynamicPortRequirement.getDesiredDynamicPort(
                     KafkaEnvConfigUtils.toEnvName("port"),
                     role,
@@ -322,6 +332,8 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
                                     .setBegin(port)
                                     .setEnd(port).build())));
         }
+        */
+        taskBuilder.addResources(portReq.getResource());
 
         CommandInfo commandInfo = getNewBrokerCmd(config, brokerId, port, containerPath);
         taskBuilder.setCommand(commandInfo);
@@ -342,7 +354,8 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
 
         try {
             if (clusterState.getCapabilities().supportsNamedVips()) {
-                DiscoveryInfo discoveryInfo = DiscoveryInfo.newBuilder()
+                portReq.setVIPLabel(labels("VIP_" + UUID.randomUUID(), "broker:9092").getLabels(0));
+                /*DiscoveryInfo discoveryInfo = DiscoveryInfo.newBuilder()
                         .setVisibility(DiscoveryInfo.Visibility.EXTERNAL)
                         .setName(brokerName)
                         .setPorts(Ports.newBuilder()
@@ -352,7 +365,7 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
                                         .setLabels(labels("VIP_" + UUID.randomUUID(), "broker:9092")))
                                 .build())
                         .build();
-                taskBuilder.setDiscovery(discoveryInfo);
+                taskBuilder.setDiscovery(discoveryInfo);*/
             }
         } catch (Exception e) {
             log.error("Error querying for named vip support. Named VIP support will be unavailable.", e);
@@ -449,8 +462,8 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
                 .setCommand(getNewExecutorCmd(config, configName, brokerId))
                 .addResources(ResourceUtils.getDesiredScalar(role, principal, "cpus", executorConfiguration.getCpus()))
                 .addResources(ResourceUtils.getDesiredScalar(role, principal, "mem", executorConfiguration.getMem()))
-                .addResources(DynamicPortRequirement.getDesiredDynamicPort("API_PORT", role, principal));
-
+                .addResources(ResourceUtils.getDesiredDynamicPort(role, principal,
+                Optional.of( "API_PORT")).getResource());
         return builder.build();
     }
 
