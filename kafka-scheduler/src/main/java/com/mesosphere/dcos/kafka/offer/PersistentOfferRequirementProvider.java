@@ -334,27 +334,10 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
         }
         */
 
-        CommandInfo commandInfo = getNewBrokerCmd(config, brokerId, port, containerPath);
-        taskBuilder.setCommand(commandInfo);
-
-        if (brokerConfiguration.getDiskType().equals(Resource.DiskInfo.Source.Type.MOUNT.name())) {
-            taskBuilder.addResources(ResourceUtils.getDesiredMountVolume(
-                    role,
-                    principal,
-                    brokerConfiguration.getDisk(),
-                    containerPath));
-        } else {
-            taskBuilder.addResources(ResourceUtils.getDesiredRootVolume(
-                    role,
-                    principal,
-                    brokerConfiguration.getDisk(),
-                    containerPath));
-        }
-
         try {
             if (clusterState.getCapabilities().supportsNamedVips()) {
                 portReq.setVIPLabel(labels("VIP_" + UUID.randomUUID(), "broker:9092").getLabels(0));
-            	log.info("I am marking port Resource with VIP label ...");
+                log.info("I am marking port Resource with VIP label ...");
                 /*DiscoveryInfo discoveryInfo = DiscoveryInfo.newBuilder()
                         .setVisibility(DiscoveryInfo.Visibility.EXTERNAL)
                         .setName(brokerName)
@@ -371,6 +354,24 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
             log.error("Error querying for named vip support. Named VIP support will be unavailable.", e);
         }
         taskBuilder.addResources(portReq.getResource());
+
+
+        CommandInfo commandInfo = getNewBrokerCmd(config, brokerId, port, containerPath);
+        taskBuilder.setCommand(commandInfo);
+
+        if (brokerConfiguration.getDiskType().equals(Resource.DiskInfo.Source.Type.MOUNT.name())) {
+            taskBuilder.addResources(ResourceUtils.getDesiredMountVolume(
+                    role,
+                    principal,
+                    brokerConfiguration.getDisk(),
+                    containerPath));
+        } else {
+            taskBuilder.addResources(ResourceUtils.getDesiredRootVolume(
+                    role,
+                    principal,
+                    brokerConfiguration.getDisk(),
+                    containerPath));
+        }
 
         KafkaHealthCheckConfiguration healthCheckConfiguration = config.getHealthCheckConfiguration();
 
