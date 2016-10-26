@@ -333,7 +333,6 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
                                     .setEnd(port).build())));
         }
         */
-        taskBuilder.addResources(portReq.getResource());
 
         CommandInfo commandInfo = getNewBrokerCmd(config, brokerId, port, containerPath);
         taskBuilder.setCommand(commandInfo);
@@ -371,6 +370,7 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
         } catch (Exception e) {
             log.error("Error querying for named vip support. Named VIP support will be unavailable.", e);
         }
+        taskBuilder.addResources(portReq.getResource());
 
         KafkaHealthCheckConfiguration healthCheckConfiguration = config.getHealthCheckConfiguration();
 
