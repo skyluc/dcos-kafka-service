@@ -306,55 +306,23 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
                         config.getBrokerConfiguration().getMem()));
 
         Long port = brokerConfiguration.getPort();
-        ResourceRequirement portReq = new ResourceRequirement(ResourceUtils.getDesiredRanges(
-                role,
-                principal,
-                "ports",
-                Arrays.asList(
-                        Range.newBuilder()
-                                .setBegin(port)
-                                .setEnd(port).build())));
-        if (port==0){
-            portReq.setEnvName(KafkaEnvConfigUtils.toEnvName("port"));  //!!!!
-        }
-        /*if (port == 0) {
-            taskBuilder.addResources(DynamicPortRequirement.getDesiredDynamicPort(
-                    KafkaEnvConfigUtils.toEnvName("port"),
-                    role,
-                    principal));
-        } else {
-            taskBuilder.addResources(ResourceUtils.getDesiredRanges(
-                    role,
-                    principal,
-                    "ports",
-                    Arrays.asList(
-                            Range.newBuilder()
-                                    .setBegin(port)
-                                    .setEnd(port).build())));
-        }
-        */
 
+        //ResourceRequirement portReq =  ResourceRequirement.getDesiredPort(role,principal,port,
+        //        Optional.ofNullable(KafkaEnvConfigUtils.toEnvName("port")));
+
+        ResourceRequirement portReq =  ResourceUtils.getDesiredPort(role,principal,port);
+        if (port==0){
+            portReq = ResourceRequirement.setEnvName(portReq,KafkaEnvConfigUtils.toEnvName("port"));
+        }
         try {
             if (clusterState.getCapabilities().supportsNamedVips()) {
-                portReq.setVIPLabel(labels("VIP_" + UUID.randomUUID(), "broker:9092").getLabels(0));
-                log.info("I am marking port Resource with VIP label ...");
-                /*DiscoveryInfo discoveryInfo = DiscoveryInfo.newBuilder()
-                        .setVisibility(DiscoveryInfo.Visibility.EXTERNAL)
-                        .setName(brokerName)
-                        .setPorts(Ports.newBuilder()
-                                .addPorts(Port.newBuilder()
-                                        .setNumber((int) (long) port)
-                                        .setProtocol("tcp")
-                                        .setLabels(labels("VIP_" + UUID.randomUUID(), "broker:9092")))
-                                .build())
-                        .build();
-                taskBuilder.setDiscovery(discoveryInfo);*/
+                portReq = ResourceRequirement.setVIPLabel(portReq,labels("VIP_" + UUID.randomUUID(), "broker:9092").getLabels(0));
+                log.info(String.format("Resource port %d is marked for VIP label / broker:9092 ", port));
             }
         } catch (Exception e) {
             log.error("Error querying for named vip support. Named VIP support will be unavailable.", e);
         }
         taskBuilder.addResources(portReq.getResource());
-
 
         CommandInfo commandInfo = getNewBrokerCmd(config, brokerId, port, containerPath);
         taskBuilder.setCommand(commandInfo);
