@@ -1,5 +1,5 @@
 ---
-post_title: Limitations
+post_title: Version Policy
 menu_order: 75 
 feature_maturity: preview
 enterprise: 'no'
