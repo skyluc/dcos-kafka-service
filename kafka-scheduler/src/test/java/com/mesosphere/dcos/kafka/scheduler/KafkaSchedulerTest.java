@@ -5,6 +5,7 @@ import com.google.inject.Injector;
 import com.mesosphere.dcos.kafka.config.DropwizardConfiguration;
 import com.mesosphere.dcos.kafka.offer.KafkaOfferRequirementProvider;
 import com.mesosphere.dcos.kafka.test.KafkaDropwizardAppRule;
+
 import io.dropwizard.setup.Environment;
 import io.dropwizard.testing.ResourceHelpers;
 import org.apache.mesos.Protos;
@@ -35,7 +36,6 @@ public class KafkaSchedulerTest {
     public final ExpectedSystemExit exit = ExpectedSystemExit.none();
 
     private static DropwizardConfiguration dropwizardConfiguration;
-    private static Environment environment;
 
     private static final String testFrameworkName = "kafka";
     private static final String testZkConnectionString = "localhost:40000";
@@ -68,9 +68,23 @@ public class KafkaSchedulerTest {
 
     @Mock private SchedulerDriver driver;
 
+    /**
+     * Disables call to {@link KafkaScheduler#getResources()Z which expects registered() callback from Mesos.
+     *
+     * For whatever reason this must be public or else NPE in tests.
+     */
+    public static class TestMain extends Main {
+        @Override
+        protected void registerResources(
+                KafkaScheduler kafkaScheduler,
+                Environment environment) throws InterruptedException {
+            // do nothing
+        }
+    }
+
     @ClassRule
     public static KafkaDropwizardAppRule<DropwizardConfiguration> RULE =
-            new KafkaDropwizardAppRule<>(Main.class, ResourceHelpers.resourceFilePath("scheduler.yml"));
+            new KafkaDropwizardAppRule<>(TestMain.class, ResourceHelpers.resourceFilePath("scheduler.yml"));
 
     @Before
     public void beforeEach() throws Exception {
@@ -84,13 +98,9 @@ public class KafkaSchedulerTest {
 
     @BeforeClass
     public static void before() {
-        final Main main = (Main) RULE.getApplication();
+        final TestMain main = (TestMain) RULE.getApplication();
         dropwizardConfiguration = main.getDropwizardConfiguration();
-        environment = main.getEnvironment();
-        injector = Guice.createInjector(
-                new TestModule(
-                        dropwizardConfiguration.getSchedulerConfiguration(),
-                        environment));
+        injector = Guice.createInjector(new TestModule(dropwizardConfiguration.getSchedulerConfiguration()));
     }
 
     @Test
@@ -128,7 +138,7 @@ public class KafkaSchedulerTest {
 
     @Test
     public void testResourceOffersSuppress() throws Exception {
-        kafkaScheduler = new KafkaScheduler(dropwizardConfiguration.getSchedulerConfiguration(), environment) {
+        kafkaScheduler = new KafkaScheduler(dropwizardConfiguration.getSchedulerConfiguration()) {
             // Create install StageManager with no operations
             @Override
             protected PlanManager createDeploymentPlanManager(Plan deploymentPlan, PhaseStrategyFactory strategyFactory) {
@@ -175,7 +185,7 @@ public class KafkaSchedulerTest {
     }
 
     private KafkaScheduler getTestKafkaScheduler() throws Exception {
-        return new KafkaScheduler(dropwizardConfiguration.getSchedulerConfiguration(), environment);
+        return new KafkaScheduler(dropwizardConfiguration.getSchedulerConfiguration());
     }
 
     private Protos.FrameworkID getTestFrameworkId() {

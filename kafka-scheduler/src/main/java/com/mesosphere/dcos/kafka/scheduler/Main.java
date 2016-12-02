@@ -1,5 +1,6 @@
 package com.mesosphere.dcos.kafka.scheduler;
 
+import com.google.common.annotations.VisibleForTesting;
 import com.mesosphere.dcos.kafka.config.DropwizardConfiguration;
 import com.mesosphere.dcos.kafka.web.BrokerCheck;
 import com.mesosphere.dcos.kafka.web.RegisterCheck;
@@ -18,10 +19,9 @@ import java.util.concurrent.ExecutorService;
 /**
  * Main entry point for the Scheduler.
  */
-public final class Main extends Application<DropwizardConfiguration> {
+public class Main extends Application<DropwizardConfiguration> {
   private static final Logger LOGGER = LoggerFactory.getLogger(Main.class);
   private DropwizardConfiguration dropwizardConfiguration;
-  private Environment environment;
 
   public static void main(String[] args) throws Exception {
     new Main().run(args);
@@ -35,7 +35,7 @@ public final class Main extends Application<DropwizardConfiguration> {
 
   @Override
   public String getName() {
-    return "DCOS Kafka Service";
+    return "DC/OS Kafka Service";
   }
 
   @Override
@@ -56,20 +56,15 @@ public final class Main extends Application<DropwizardConfiguration> {
     return dropwizardConfiguration;
   }
 
-  Environment getEnvironment() {
-    return environment;
-  }
-
   @Override
   public void run(DropwizardConfiguration dropwizardConfiguration, Environment environment) throws Exception {
     LOGGER.info("DropwizardConfiguration: " + dropwizardConfiguration);
     this.dropwizardConfiguration = dropwizardConfiguration;
-    this.environment = environment;
 
     final KafkaScheduler kafkaScheduler =
-            new KafkaScheduler(dropwizardConfiguration.getSchedulerConfiguration(), getEnvironment());
+            new KafkaScheduler(dropwizardConfiguration.getSchedulerConfiguration());
 
-    registerHealthChecks(kafkaScheduler, getEnvironment());
+    registerHealthChecks(kafkaScheduler, environment);
 
     kafkaSchedulerExecutorService = environment.lifecycle().
             executorService("KafkaScheduler")
@@ -77,6 +72,8 @@ public final class Main extends Application<DropwizardConfiguration> {
             .maxThreads(2)
             .build();
     kafkaSchedulerExecutorService.submit(kafkaScheduler);
+
+    registerResources(kafkaScheduler, environment);
   }
 
   private void registerHealthChecks(
@@ -90,4 +87,13 @@ public final class Main extends Application<DropwizardConfiguration> {
             RegisterCheck.NAME,
             new RegisterCheck(kafkaScheduler));
   }
+
+  @VisibleForTesting
+  protected void registerResources(
+          KafkaScheduler kafkaScheduler,
+          Environment environment) throws InterruptedException {
+    for (Object o : kafkaScheduler.getResources()) {
+      environment.jersey().register(o);
+    }
+  };
 }

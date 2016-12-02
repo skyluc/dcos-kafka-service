@@ -19,13 +19,11 @@ import com.mesosphere.dcos.kafka.state.FrameworkState;
 import com.mesosphere.dcos.kafka.web.BrokerController;
 import com.mesosphere.dcos.kafka.web.ConnectionController;
 import com.mesosphere.dcos.kafka.web.TopicController;
-import io.dropwizard.setup.Environment;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.mesos.Protos.*;
 import org.apache.mesos.Scheduler;
 import org.apache.mesos.SchedulerDriver;
-import org.apache.mesos.api.JettyApiServer;
 import org.apache.mesos.config.ConfigStoreException;
 import org.apache.mesos.config.RecoveryConfiguration;
 import org.apache.mesos.config.api.ConfigResource;
@@ -50,8 +48,9 @@ import org.apache.mesos.state.api.StateResource;
 import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.*;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -63,7 +62,6 @@ public class KafkaScheduler implements Scheduler, Runnable {
     private static final int TWO_WEEK_SEC = 2 * 7 * 24 * 60 * 60;
     private static TaskKiller taskKiller;
 
-    private final ExecutorService executor = Executors.newCachedThreadPool();
     private final KafkaConfigState configState;
     private final KafkaSchedulerConfiguration envConfig;
     private final FrameworkState frameworkState;
@@ -77,18 +75,21 @@ public class KafkaScheduler implements Scheduler, Runnable {
     private final AtomicReference<RecoveryStatus> recoveryStatusRef;
     private final DefaultPlan installPlan;
     private final PersistentOfferRequirementProvider offerRequirementProvider;
-    private final Environment environment;
     private final KafkaSchedulerConfiguration kafkaSchedulerConfiguration;
+
+    // use capacity 2, because 1 *will* block until resources are removed:
+    private final BlockingQueue<Collection<Object>> resourcesQueue = new ArrayBlockingQueue<>(2);
+
     private PlanManager planManager;
     private DefaultPlanScheduler planScheduler;
     private DefaultRecoveryScheduler repairScheduler;
     private SchedulerDriver driver;
+    private Collection<Object> resources;
 
     private boolean isRegistered = false;
 
-    public KafkaScheduler(KafkaSchedulerConfiguration configuration, Environment environment) throws ConfigStoreException, URISyntaxException {
+    public KafkaScheduler(KafkaSchedulerConfiguration configuration) throws ConfigStoreException, URISyntaxException {
         this.kafkaSchedulerConfiguration = configuration;
-        this.environment = environment;
         ConfigStateUpdater configStateUpdater = new ConfigStateUpdater(configuration);
         List<String> stageErrors = new ArrayList<>();
         KafkaSchedulerConfiguration targetConfigToUse;
@@ -143,42 +144,42 @@ public class KafkaScheduler implements Scheduler, Runnable {
                 offerAccepter,
                 new OfferEvaluator(frameworkState.getStateStore()),
                 taskKiller);
-        startApiServer();
+        // use add() to just throw if full:
+        resourcesQueue.add(Arrays.asList(
+                // Kafka-specific APIs:
+                new ConnectionController(
+                        kafkaSchedulerConfiguration.getFullKafkaZookeeperPath(),
+                        getConfigState(),
+                        getKafkaState(),
+                        new ClusterState(new DcosCluster()),
+                        kafkaSchedulerConfiguration.getZookeeperConfig().getFrameworkName()),
+                new BrokerController(this),
+                new TopicController(new CmdExecutor(kafkaSchedulerConfiguration, this), this),
+                new RecoveryResource(getRecoveryStatusRef()),
+
+                // APIs from dcos-commons:
+                new ConfigResource<>(
+                        getConfigState().getConfigStore(),
+                        KafkaSchedulerConfiguration.getFactoryInstance()),
+                new TaskResource(
+                        getFrameworkState().getStateStore(),
+                        taskKiller,
+                        kafkaSchedulerConfiguration.getServiceConfiguration().getName()),
+                new PlanResource(getPlanManager()),
+                new StateResource(frameworkState.getStateStore(), new JsonPropertyDeserializer())));
     }
 
-    private void startApiServer() {
-        // Kafka-specific APIs:
-        Collection<Object> resources = new ArrayList<>();
-        resources.add(new ConnectionController(
-                kafkaSchedulerConfiguration.getFullKafkaZookeeperPath(),
-                getConfigState(),
-                getKafkaState(),
-                new ClusterState(new DcosCluster()),
-                kafkaSchedulerConfiguration.getZookeeperConfig().getFrameworkName()));
-        resources.add(new BrokerController(this));
-        resources.add(new TopicController(
-                new CmdExecutor(kafkaSchedulerConfiguration, this),
-                this));
-        resources.add(new RecoveryResource(getRecoveryStatusRef()));
-
-        // APIs from dcos-commons:
-        resources.add(new ConfigResource<>(
-                getConfigState().getConfigStore(),
-                KafkaSchedulerConfiguration.getFactoryInstance()));
-        resources.add(new TaskResource(
-                getFrameworkState().getStateStore(),
-                taskKiller,
-                kafkaSchedulerConfiguration.getServiceConfiguration().getName()));
-        resources.add(new PlanResource(getPlanManager()));
-        resources.add(new StateResource(frameworkState.getStateStore(), new JsonPropertyDeserializer()));
-
-        executor.execute(() -> {
-            try {
-                new JettyApiServer(Integer.valueOf(System.getenv("PORT1")), resources).start();
-            } catch (Exception e) {
-                log.error("Failed to start API server.", e);
+    Collection<Object> getResources() throws InterruptedException {
+        if (resources == null) {
+            // wait for scheduler thread to register and create resources
+            log.info("Waiting for registration to finish and resources to become available...");
+            resources = resourcesQueue.poll(60, TimeUnit.SECONDS);
+            if (resources == null) {
+                throw new RuntimeException("Timed out waiting for resources from scheduler");
             }
-        });
+            log.info(String.format("Got %d resources", resources.size()));
+        }
+        return resources;
     }
 
     protected DefaultRecoveryScheduler createRecoveryScheduler(KafkaOfferRequirementProvider offerRequirementProvider) {
@@ -407,7 +408,7 @@ public class KafkaScheduler implements Scheduler, Runnable {
 
         String zkPath = "zk://" + envConfig.getKafkaConfiguration().getMesosZkUri() + "/mesos";
         FrameworkInfo fwkInfo = getFrameworkInfo();
-        log.info("Registering framework with: " + fwkInfo);
+        log.info("Registering framework with: " + TextFormat.shortDebugString(fwkInfo));
         registerFramework(this, fwkInfo, zkPath);
     }
 

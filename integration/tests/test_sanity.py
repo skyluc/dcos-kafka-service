@@ -1,5 +1,6 @@
 import dcos.config
 import dcos.http
+import json
 import pytest
 import shakedown
 import urllib
@@ -264,6 +265,17 @@ def test_is_suppressed():
     response = dcos.http.get(suppressed_url)
     response.raise_for_status()
     assert response.text == "true"
+
+
+@pytest.mark.sanity
+def test_cli_healthcheck_succeeds():
+    raw_result, error = shakedown.run_dcos_command('{} health'.format(PACKAGE_NAME))
+    result = json.loads(raw_result)
+    assert not error
+    assert len(result) == 3
+    assert result["broker_count"]["healthy"]
+    assert result["deadlocks"]["healthy"]
+    assert result["registered"]["healthy"]
 
 
 def get_running_broker_task(broker_name):
