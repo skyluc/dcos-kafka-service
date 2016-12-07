@@ -203,7 +203,6 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
         final ZookeeperConfiguration zkConfig = config.getZookeeperConfig();
 
         Map<String, String> envMap = new HashMap<>();
-        envMap.put("JAVA_HOME", "jre1.8.0_91");
         envMap.put("FRAMEWORK_NAME", frameworkName);
         envMap.put(CONFIG_ID_KEY, configName);
         envMap.put("KAFKA_ZOOKEEPER_URI", zkConfig.getKafkaZkUri());
@@ -353,7 +352,9 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
 
     private String getBrokerCmd(KafkaSchedulerConfiguration config) {
         List<String> commands = new ArrayList<>();
-        commands.add("export PATH=$(ls -d $MESOS_SANDBOX/jre*/bin):$PATH"); // find directory that starts with "jre" containing "bin"
+        commands.add("export JAVA_HOME=$(ls -d $MESOS_SANDBOX/jre*/)"); // find directory that starts with "jre"
+        commands.add("export PATH=$JAVA_HOME/bin:$PATH");
+        commands.add("env");
         commands.add("$MESOS_SANDBOX/overrider/bin/kafka-config-overrider server $MESOS_SANDBOX/overrider/conf/scheduler.yml");
         commands.add(String.format(
                 "exec $MESOS_SANDBOX/%1$s/bin/kafka-server-start.sh "+
@@ -391,15 +392,17 @@ public class PersistentOfferRequirementProvider implements KafkaOfferRequirement
         ExecutorConfiguration executorConfiguration = config.getExecutorConfiguration();
         String frameworkName = config.getServiceConfiguration().getName();
 
-        final String executorCommand = "./executor/bin/kafka-executor server ./executor/conf/executor.yml";
+        List<String> commands = new ArrayList<>();
+        commands.add("export JAVA_HOME=$(ls -d $MESOS_SANDBOX/jre*/)"); // find directory that starts with "jre"
+        commands.add("env");
+        commands.add("./executor/bin/kafka-executor server ./executor/conf/executor.yml");
         Map<String, String> executorEnvMap = new HashMap<>();
-        executorEnvMap.put("JAVA_HOME", "jre1.8.0_91");
         executorEnvMap.put("FRAMEWORK_NAME", frameworkName);
         executorEnvMap.put("KAFKA_ZOOKEEPER_URI", zookeeperConfiguration.getKafkaZkUri());
         executorEnvMap.put(KafkaEnvConfigUtils.KAFKA_OVERRIDE_PREFIX + "BROKER_ID", Integer.toString(brokerId));
         executorEnvMap.put(CONFIG_ID_KEY, configName);
         return CommandInfo.newBuilder()
-                .setValue(executorCommand)
+                .setValue(Joiner.on(" && ").join(commands))
                 .setEnvironment(OfferUtils.environment(executorEnvMap))
                 .addUris(uri(brokerConfiguration.getJavaUri()))
                 .addUris(uri(brokerConfiguration.getKafkaUri()))
