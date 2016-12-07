@@ -1,5 +1,5 @@
 ext {
-  aws = "http://downloads.mesosphere.io/"
+  aws = "https://s3.amazonaws.com/spark-test-luc/universe/resources/"
   basePath = "kafka/assets/"
   packageVer = "stub-universe" // is replaced
   cliBase = "dcos-kafka-"
@@ -16,7 +16,7 @@ task universe(
   dependsOn: packageVersion,
   group: "universe",
   description: "Copies universe files to build and modifies there artifact dir") {
-  inputs.file file("universe/package")
+  inputs.file file("universe/")
   // incremental builds might be nice but need to research multiple inputs
   // outputs.dir "$buildDir/universe"
   doLast {
@@ -26,13 +26,13 @@ task universe(
       throw new GradleException("Invalid Release Version: $packageVer")
 
     copy {
-      from "universe/package"
+      from "universe/"
       into "$buildDir/universe"
       filter{
         String line -> line.replaceAll("\\{\\{artifact-dir\\}\\}", aws + basePath + packageVer)
       }
       filter{
-        String line -> line.replaceAll("stub-universe", packageVer)
+        String line -> line.replaceAll("\\{\\{package-version\\}\\}", packageVer)
       }
       // future proof the client
       filter{
